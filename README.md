@@ -465,23 +465,11 @@ List<Pet> findNearbyActivePets(@Param("latitude") double latitude,
 - **검색 시간**: 2초 → 100ms (95% 단축)
 - **동시 처리**: 500 QPS 지원
 
-## 📈 향후 개발 계획
-
-### **단기 계획**
-- [ ] GraphQL API 추가
-- [ ] 캐시 계층 강화 (Redis Cluster)
-- [ ] API 문서화 자동화 (Swagger 3.0)
-
-### **장기 계획**
-- [ ] 마이크로서비스 아키텍처 전환
-- [ ] AI 기반 반려동물 매칭 알고리즘
-- [ ] Kubernetes 배포 환경 구축
-
 ## 📞 연락처 & 링크
 
-- **프론트엔드 레포**: [TailFriends Frontend](../ncamp16-team3-front)
-- **API 문서**: [Swagger UI](http://api.tailfriends.com/swagger-ui.html)
-- **라이브 데모**: [TailFriends.com](http://tailfriends.com)
+- **프론트엔드 레포**: [TailFriends Frontend](https://github.com/C4T4767/ncamp16-team3-front)
+- **API 문서**: [Notion 문서](https://www.notion.so/1b3abc2fa01c80fa8653c5044ca71aa8)
+- **라이브 데모**: ~~TailFriends.com~~ (서비스 종료)
 
 ---
 
