@@ -214,7 +214,7 @@ public ResponseEntity<?> saveTempReserve(@RequestBody ReserveRequestDto dto) {
     return ResponseEntity.ok(Map.of("reserveId", reserveKey));
 }
 
-// RedisService.java
+// RedisService.java - 실제 구현 코드
 public void saveTempReserve(String reserveKey, ReserveRequestDto dto) {
     String json = objectMapper.writeValueAsString(dto);
     redisTemplate.opsForValue().set(reserveKey, json, Duration.ofMinutes(15));
@@ -222,10 +222,11 @@ public void saveTempReserve(String reserveKey, ReserveRequestDto dto) {
 ```
 - **결과**: 중복 예약 완전 차단, 15분 TTL로 메모리 효율성 확보
 
-### **2. 실시간 스토리 방문 추적**
+### **2. 실시간 스토리 방문 추적 최적화**
 - **문제**: 대량 사용자의 스토리 방문 기록으로 인한 DB 부하
 - **해결**: Redis Set + TTL을 활용한 캐싱
 ```java
+// RedisService.java - 실제 구현 코드
 public void markStoryVisited(Integer storyOwnerId, Integer visitorId) {
     String visitedKey = "story:visited:" + storyOwnerId;
     redisTemplate.opsForSet().add(visitedKey, visitorId.toString());
@@ -277,7 +278,7 @@ docker-compose up -d
 # Redis: localhost:6379
 ```
 
-## 📊 성능 & 모니터링
+## 📊 성능 지표
 
 ### **API 응답 시간**
 - **평균 응답시간**: 50ms 미만
@@ -289,182 +290,6 @@ docker-compose up -d
 - **API 처리량**: 1000 RPS
 - **데이터베이스**: 커넥션 풀 최적화
 
-## 🔍 핵심 트러블슈팅 사례
-
-### **1. 예약 시스템 동시성 문제 해결 (Race Condition)**
-
-**🚨 문제 상황**
-```
-동시에 여러 사용자가 같은 시간대 미용실 예약 시도
-→ DB에 중복 예약 데이터 생성
-→ 사업자와 고객 간 분쟁 발생 가능
-```
-
-**🔍 근본 원인 분석**
-- **경쟁 상태**: 동시 트랜잭션에서 같은 자원 접근
-- **트랜잭션 격리 수준** 부족
-- **원자적 연산** 미보장
-
-**💡 해결 방안: Redis 분산 락 구현**
-```java
-@Service
-@Transactional
-public class ReservationService {
-    
-    @Autowired
-    private RedisTemplate<String, String> redisTemplate;
-    
-    public ReservationResponse createReservation(ReservationRequest request) {
-        String lockKey = "reservation:lock:" + request.getFacilityId() 
-                        + ":" + request.getTimeSlot();
-        String lockValue = UUID.randomUUID().toString();
-        
-        try {
-            // Redis SETNX로 분산 락 획득 (TTL 30초)
-            Boolean acquired = redisTemplate.opsForValue()
-                .setIfAbsent(lockKey, lockValue, Duration.ofSeconds(30));
-            
-            if (!acquired) {
-                throw new ReservationConflictException("동시 예약 요청으로 인한 충돌");
-            }
-            
-            // 예약 가능성 재검증
-            if (isTimeSlotAlreadyBooked(request.getFacilityId(), request.getTimeSlot())) {
-                throw new TimeSlotUnavailableException("이미 예약된 시간입니다");
-            }
-            
-            // 예약 생성 및 결제 연동
-            Reservation reservation = reservationRepository.save(
-                Reservation.builder()
-                    .facilityId(request.getFacilityId())
-                    .userId(request.getUserId())
-                    .timeSlot(request.getTimeSlot())
-                    .status(ReservationStatus.PENDING)
-                    .build()
-            );
-            
-            // 결제 API 호출
-            PaymentResponse payment = paymentService.processPayment(request);
-            
-            if (payment.isSuccess()) {
-                reservation.confirmReservation();
-                reservationRepository.save(reservation);
-            } else {
-                // 결제 실패 시 예약 롤백
-                reservationRepository.delete(reservation);
-                throw new PaymentFailedException("결제 처리 실패");
-            }
-            
-            return ReservationResponse.from(reservation);
-            
-        } finally {
-            // 락 해제 (lua 스크립트로 원자적 처리)
-            releaseLock(lockKey, lockValue);
-        }
-    }
-    
-    private void releaseLock(String lockKey, String lockValue) {
-        String luaScript = 
-            "if redis.call('get', KEYS[1]) == ARGV[1] then " +
-            "return redis.call('del', KEYS[1]) " +
-            "else return 0 end";
-        
-        redisTemplate.execute(new DefaultRedisScript<>(luaScript, Long.class),
-            Collections.singletonList(lockKey), lockValue);
-    }
-}
-```
-
-**📊 성과 및 개선 효과**
-- **중복 예약**: 100% 방지 (이전 주당 3-5건 발생)
-- **예약 처리 속도**: 평균 200ms 유지
-- **결제 성공률**: 99.5% 달성
-- **동시 접속**: 1000명 부하 테스트 통과
-
-**🎯 기술적 핵심 포인트**
-- **Redis SETNX**: 원자적 락 획득
-- **TTL 설정**: 데드락 방지 (30초 자동 해제)
-- **Lua 스크립트**: 락 해제의 원자성 보장
-- **트랜잭션 롤백**: 결제 실패 시 데이터 정합성 유지
-
-### **2. CI/CD 파이프라인 구축으로 배포 안정성 확보**
-
-**🚨 문제 상황**
-- 로컬-서버 환경 차이로 빌드 실패 빈발
-- 수동 배포 과정에서 설정 오류 발생
-- 장애 발생 시 롤백 시간 과다 소요
-
-**💡 해결 방안**
-```yaml
-# Jenkinsfile
-pipeline {
-    agent any
-    
-    stages {
-        stage('Test') {
-            steps {
-                sh './gradlew test'
-                sh './gradlew jacocoTestReport'
-            }
-            post {
-                always {
-                    publishTestResults testResultsPattern: 'build/test-results/test/*.xml'
-                    publishCoverage adapters: [jacocoAdapter('build/reports/jacoco/test/jacocoTestReport.xml')]
-                }
-            }
-        }
-        
-        stage('Build Docker Image') {
-            steps {
-                sh 'docker build -t tailfriends-backend:${BUILD_NUMBER} .'
-                sh 'docker tag tailfriends-backend:${BUILD_NUMBER} tailfriends-backend:latest'
-            }
-        }
-        
-        stage('Deploy to Kubernetes') {
-            steps {
-                sh '''
-                    kubectl set image deployment/tailfriends-backend \
-                    tailfriends-backend=tailfriends-backend:${BUILD_NUMBER}
-                    kubectl rollout status deployment/tailfriends-backend
-                '''
-            }
-        }
-    }
-}
-```
-
-**📊 개선 효과**
-- **배포 시간**: 10분 → 2분 (80% 단축)
-- **수동 오류**: 주 3-4회 → 0회
-- **롤백 시간**: 15분 → 1분 (Kubernetes 롤링 업데이트)
-
-### **3. 위치 기반 매칭 알고리즘 최적화**
-
-**💡 하버사인 공식 + 공간 인덱스 활용**
-```java
-@Query(value = """
-    SELECT p.*, 
-           (6371 * acos(cos(radians(:latitude)) * cos(radians(u.latitude)) 
-           * cos(radians(u.longitude) - radians(:longitude)) 
-           + sin(radians(:latitude)) * sin(radians(u.latitude)))) AS distance
-    FROM pets p 
-    JOIN users u ON p.owner_id = u.id 
-    WHERE p.activity_status != 'NONE'
-    AND (6371 * acos(cos(radians(:latitude)) * cos(radians(u.latitude)) 
-         * cos(radians(u.longitude) - radians(:longitude)) 
-         + sin(radians(:latitude)) * sin(radians(u.latitude)))) < :radiusKm
-    ORDER BY distance
-    """, nativeQuery = true)
-List<Pet> findNearbyActivePets(@Param("latitude") double latitude, 
-                               @Param("longitude") double longitude, 
-                               @Param("radiusKm") double radiusKm);
-```
-
-**📊 성능 개선**
-- **검색 시간**: 2초 → 100ms (95% 단축)
-- **동시 처리**: 500 QPS 지원
-
 ## 📞 연락처 & 링크
 
 - **프론트엔드 레포**: [TailFriends Frontend](https://github.com/C4T4767/ncamp16-team3-front)
@@ -475,65 +300,6 @@ List<Pet> findNearbyActivePets(@Param("latitude") double latitude,
 
 📅 **개발 기간**: 2025.03.12 ~ 2025.05.12 (8주)  
 👨‍💻 **개발자**: 네이버 클라우드 캠프 16기 3팀  
-🏷 **Version**: 1.0.0
-
-## ✏ Coding Convention
-### 함수에 대한 주석
-- 백엔드에서 공통적으로 사용하는 함수의 경우, 모듈화를 통해 하나의 파일로 관리한다.
-- 하나의 파일의 시작 부분에 주석으로 상세 내용을 작성한다.
-### 변수명
-- Camel Case로 작성한다.
-- 의미를 파악하기 쉬운 변수명을 사용한다.
-- 웬만하면 약어는 지양하도록 한다.
-- boolean의 경으 'is', 'has', 'can'과 같은 접두어를 사용한다.
-- 숫자의 경우 'max', 'min', 'total'과 같은 접두어로 의미를 표기한다.
-- 함수일 경우 동사와 명사를 사용하여 `actionResource`의 형식(동사+명사)을 따르도록 한다.
-- 상수는 대문자로 표기한다.
-### Code
-- 중괄호로 묶이지 않은 블록문은 금지한다.
-- 들여쓰기의 크기는 4-spaces로 한다.
-<br><br>
-
-## ⌨ Git Convention
-### Commit Convention
-- ✅ [CHORE] : 동작에 영향 없는 코드 or 변경 없는 변경사항(주석 추가 등)
-- ✨ [FEAT] : 새로운 기능 구현
-- ➕ [ADD] : Feat 이외의 부수적인 코드 추가, 라이브러리 추가, 새로운 파일 생성
-- 🔨 [FIX] : 버그, 오류 해결
-- ⚰️ [DEL] : 쓸모없는 코드 삭제
-- 📝 [DOCS] : README나 WIKI 등의 문서 수정
-- ✏️ [CORRECT] : 주로 문법의 오류나 타입의 변경, 이름 변경시
-- ⏪️ [RENAME] : 파일 이름 변경시
-- ♻️ [REFACTOR] : 전면 수정
-- 🔀 [MERGE]: 다른 브랜치와 병합
-ex) `git commit -m "[FEAT] 회원가입 기능 완료"`
-
-## PR Template
-## 📌 PR 제목
-- [Fix] 로그인 버그 수정
-- [Feat] 새로운 예약 기능 추가
-
-## 📢 작업 내용
-- [ ] 회원 가입 시 SMS 인증 추가
-- [ ] 예약 확정 시 알림 기능 구현
-
-## 🔎 변경 사항
-해당 PR에서 변경된 내용에 대한 간략한 설명을 적어주세요.
-
-## 🚀 테스트 방법
-1. 회원가입 시 전화번호 입력 후 인증 요청
-2. 예약 확정 후 알림이 정상적으로 도착하는지 확인
-
-## 📸 스크린샷 (선택)
-(가능하면 변경된 UI/UX 부분의 스크린샷을 첨부해주세요)
-
-## 💡 추가 설명
-관련 참고 자료나 추가 설명이 있다면 여기에 적어주세요.
-
-## ✅ 체크리스트
-- [ ] PR 제목을 적절하게 작성했나요?
-- [ ] 코드 스타일이 일관적인가요?
-- [ ] 관련된 이슈가 있다면 연결했나요? (`Closes #이슈번호`)
-
-## ⛓️ 관련 이슈
-Closes #이슈번호
+🏷 **Version**: 1.0.0  
+⚡ **Build Tool**: Gradle 8.10  
+☕ **Java Version**: 17
