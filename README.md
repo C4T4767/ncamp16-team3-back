@@ -60,17 +60,6 @@
 - **OAuth 2.0** - 소셜 로그인
 - **RabbitMQ** - 메시지 큐
 
-## 📊 프로젝트 규모
-
-![Database ERD](screenshots/erd.png)
-
-- **총 Java 파일**: 258개
-- **REST API 엔드포인트**: 80+ 개
-- **데이터베이스 테이블**: 30+ 개
-- **주요 Controller**: 24개
-
-<br><br>
-
 ## 💻 팀 소개
 <table>
   <tbody>
@@ -156,51 +145,6 @@
 | `FacilityController` | 편의시설 검색/예약 | 거리순 정렬 |
 | `PaymentController` | 결제 처리 | 토스페이먼츠 연동 |
 
-## 💡 기술적 하이라이트
-
-### **1. 실시간 위치 기반 매칭**
-```java
-@Service
-public class PetMatchingService {
-    // 하버사인 공식을 이용한 거리 계산
-    public List<PetMatchDto> findNearbyPets(double lat, double lon, DistanceLevel level) {
-        double radius = getRadiusByLevel(level); // LEVEL1(1km) ~ LEVEL4(10km)
-        return petRepository.findPetsWithinRadius(lat, lon, radius);
-    }
-}
-```
-
-### **2. WebSocket 실시간 채팅**
-```java
-@MessageMapping("/chat.send")
-@SendTo("/topic/chat/{roomId}")
-public ChatMessage sendMessage(ChatMessage message) {
-    // FCM 푸시 알림 발송
-    fcmService.sendNotificationToUser(message);
-    return chatService.saveMessage(message);
-}
-```
-
-### **3. JWT + OAuth2 보안**
-```java
-@Configuration
-public class SecurityConfig {
-    // JWT + OAuth2 통합 인증
-    // 자동 회원가입 & 로그인 처리
-    // 권한별 API 접근 제어
-}
-```
-
-### **4. 파일 업로드 & CDN**
-```java
-@PostMapping("/upload")
-public ResponseEntity<FileUploadResponse> uploadFile(@RequestParam MultipartFile file) {
-    // AWS S3 업로드 + CDN URL 반환
-    // 이미지 리사이징 & 압축
-    // 썸네일 자동 생성
-}
-```
-
 ## 🔧 트러블슈팅 & 해결
 
 ### **1. 예약 시스템 동시성 문제**
@@ -277,18 +221,6 @@ docker-compose up -d
 # MySQL: localhost:3306
 # Redis: localhost:6379
 ```
-
-## 📊 성능 지표
-
-### **API 응답 시간**
-- **평균 응답시간**: 50ms 미만
-- **매칭 알고리즘**: 200ms 미만
-- **파일 업로드**: 1초 미만 (10MB 기준)
-
-### **동시 접속 처리**
-- **WebSocket 연결**: 1000명 동시 지원
-- **API 처리량**: 1000 RPS
-- **데이터베이스**: 커넥션 풀 최적화
 
 ## 📞 연락처 & 링크
 
